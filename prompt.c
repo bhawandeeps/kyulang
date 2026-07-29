@@ -1,6 +1,7 @@
 #include <stdio.h>
+#include <stdlib.h>
 
-static char input[2048];
+#include <editline/readline.h>
 
 int main(int argc, char *argv[])
 {
@@ -9,11 +10,13 @@ int main(int argc, char *argv[])
     puts("Press Ctrl+C to Exit\n");
 
     while (1) {
-        fputs("halo^_^ ~>", stdout);
+        char* input = readline("halo^_^ ~>");
         
-        fgets(input, 2048, stdin);
+        add_history(input);
 
         printf("No, you are a %s\n", input);
+
+        free(input);
     }
 
     return 0;
