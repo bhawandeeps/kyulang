@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            operator:   '+' | '-' | '*' | '/' ; \
+            operator:   '+' | '-' | '*' | '/' | '%' | '^' | 'm' 'i' 'n' | 'm' 'a' 'x' ; \
             expr    :   <number> | '(' <operator> <expr>+ ')' ; \
             Kyulang :   /^/ <operator> <expr>+ /$/ ; \
             ",
@@ -95,5 +95,15 @@ long eval_op(long x, char* op, long y) {
     if (strcmp(op, "-") == 0) { return x - y; }
     if (strcmp(op, "*") == 0) { return x * y; }
     if (strcmp(op, "/") == 0) { return x / y; }
+    if (strcmp(op, "%") == 0) { return x % y; }
+    if (strcmp(op, "^") == 0) {
+        int result = 1;
+        for (int i = 0; i < y; i++) {
+            result *= x;
+        }
+        return result;
+    }
+    if (strcmp(op, "min") == 0) { if (x > y) { return y; } else { return x; }}
+    if (strcmp(op, "max") == 0) { if (x < y) { return y; } else { return x; }}
     return 0;
 }
