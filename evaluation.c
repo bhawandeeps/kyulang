@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            operator:   '+' | '-' | '*' | '/' | '%' | '^' | 'm' 'i' 'n' | 'm' 'a' 'x' ; \
+            operator:   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" ; \
             expr    :   <number> | '(' <operator> <expr>+ ')' ; \
             Kyulang :   /^/ <operator> <expr>+ /$/ ; \
             ",
