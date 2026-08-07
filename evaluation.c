@@ -1,5 +1,7 @@
 #include "mpc.h"
 
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -25,13 +27,28 @@ void add_history(char* unused) {}
 
 #endif
 
-long eval(mpc_ast_t* t);
+enum { KVAL_NUM, KVAL_ERR };
 
-long eval_op(long x, char* op, long y);
+enum { KERR_DIV_ZERO, KERR_BAD_OP, KERR_BAD_NUM };
+
+typedef struct {
+    int type;
+    long num;
+    int err;
+} kval;
+
+kval kval_num(long x);
+kval kval_err(int x);
+void kval_print(kval v);
+void kval_println(kval v);
+
+kval eval(mpc_ast_t* t);
+
+kval eval_op(kval x, char* op, kval y);
 
 int main(int argc, char *argv[])
 {
-    
+
     mpc_parser_t* Number = mpc_new("number");
     mpc_parser_t* Operator = mpc_new("operator");
     mpc_parser_t* Expr = mpc_new("expr");
@@ -45,20 +62,20 @@ int main(int argc, char *argv[])
             Kyulang :   /^/ <operator> <expr>+ /$/ ; \
             ",
             Number, Operator, Expr, Kyulang);
-    
+
     puts("Kyulang version 0.0.0.0.1");
     puts("Press Ctrl+C to Exit\n");
 
     while (1) {
         char* input = readline("halo^_^ ~>");
-        
+
         add_history(input);
 
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Kyulang, &r)) {
             mpc_ast_print(r.output);
-            long result = eval(r.output);
-            printf("I uh- uh- I think it is %li\n", result);
+            kval result = eval(r.output);
+            kval_println(result);
             mpc_ast_delete(r.output);
         } else {
             mpc_err_print(r.error);
@@ -73,19 +90,22 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-long eval(mpc_ast_t* t) {
+kval eval(mpc_ast_t* t) {
     if (strstr(t->tag, "number")) {
-        return atoi(t->contents);
+        errno = 0;
+        long x = strtol(t->contents, NULL, 10);
+        return errno != ERANGE ? kval_num(x) : kval_err(KERR_BAD_NUM);
     }
 
     char* op = t->children[1]->contents;
 
-    long x = eval(t->children[2]);
+    kval x = eval(t->children[2]);
 
     int i = 3;
 
     if (strcmp(op, "-") == 0 && !strstr(t->children[i]->tag, "expr")) {
-        return -x;
+        x.num = -(x.num);
+        return x;
     }
 
     while(strstr(t->children[i]->tag, "expr")) {
@@ -95,20 +115,55 @@ long eval(mpc_ast_t* t) {
     return x;
 }
 
-long eval_op(long x, char* op, long y) {
-    if (strcmp(op, "+") == 0) { return x + y; }
-    if (strcmp(op, "-") == 0) { return x - y; }
-    if (strcmp(op, "*") == 0) { return x * y; }
-    if (strcmp(op, "/") == 0) { return x / y; }
-    if (strcmp(op, "%") == 0) { return x % y; }
-    if (strcmp(op, "^") == 0) {
-        int result = 1;
-        for (int i = 0; i < y; i++) {
-            result *= x;
-        }
-        return result;
+kval eval_op(kval x, char* op, kval y) {
+    if (x.type == KVAL_ERR) { return x; }
+    if (y.type == KVAL_ERR) { return y; }
+
+    if (strcmp(op, "+") == 0) { return kval_num(x.num + y.num); }
+    if (strcmp(op, "-") == 0) { return kval_num(x.num - y.num); }
+    if (strcmp(op, "*") == 0) { return kval_num(x.num * y.num); }
+    if (strcmp(op, "/") == 0) { return y.num == 0 ? kval_err(KERR_DIV_ZERO) : kval_num(x.num / y.num); }
+    if (strcmp(op, "%") == 0) { return y.num == 0 ? kval_err(KERR_DIV_ZERO) : kval_num(x.num % y.num); }
+    if (strcmp(op, "^") == 0) { return kval_num(pow(x.num, y.num)); }
+    if (strcmp(op, "min") == 0) { return x.num > y.num ? y : x; }
+    if (strcmp(op, "max") == 0) { return x.num < y.num ? y : x; }
+
+    return kval_err(KERR_BAD_OP);
+}
+
+kval kval_num(long x) {
+    kval v;
+    v.type = KVAL_NUM;
+    v.num = x;
+    return v;
+}
+
+kval kval_err(int x) {
+    kval v;
+    v.type = KVAL_ERR;
+    v.err = x;
+    return v;
+}
+
+void kval_print(kval v) {
+    switch (v.type) {
+        case KVAL_NUM: printf("I uh- uh- think it is %li", v.num); break;
+
+        case KVAL_ERR:
+            if (v.err == KERR_DIV_ZERO) {
+                printf("ERROR>~<: You cannot divide by a zero!");
+            }
+            if (v.err == KERR_BAD_OP) {
+                printf("ERROR>~<: The operator isn't valid bro!");
+            }
+            if (v.err == KERR_BAD_NUM) {
+                printf("ERROR>~<: The number is too big for me!");
+            }
+        break;
     }
-    if (strcmp(op, "min") == 0) { if (x > y) { return y; } else { return x; }}
-    if (strcmp(op, "max") == 0) { if (x < y) { return y; } else { return x; }}
-    return 0;
+}
+
+void kval_println(kval v) {
+    kval_print(v);
+    putchar('\n');
 }
