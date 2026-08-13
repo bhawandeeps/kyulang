@@ -110,32 +110,6 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-/*kval eval(mpc_ast_t* t) {
-    if (strstr(t->tag, "number")) {
-        errno = 0;
-        long x = strtol(t->contents, NULL, 10);
-        return errno != ERANGE ? kval_num(x) : kval_err(KERR_BAD_NUM);
-    }
-
-    char* op = t->children[1]->contents;
-
-    kval x = eval(t->children[2]);
-
-    int i = 3;
-
-    if (strcmp(op, "-") == 0 && !strstr(t->children[i]->tag, "expr")) {
-        x.num = -(x.num);
-        return x;
-    }
-
-    while(strstr(t->children[i]->tag, "expr")) {
-        x = eval_op(x, op, eval(t->children[i]));
-        i++;
-    }
-    return x;
-}
-*/
-
 kval* builtin_op(kval* a, char* op) {
     for (int i = 0; i < a->count; i++) {
         if (a->cell[i]->type != KVAL_NUM) {
