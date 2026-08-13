@@ -1,7 +1,8 @@
 #include "mpc.h"
 
 #include <errno.h>
-#include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -27,20 +28,33 @@ void add_history(char* unused) {}
 
 #endif
 
-enum { KVAL_NUM, KVAL_ERR };
+enum { KVAL_NUM, KVAL_ERR, KVAL_SEXPR, KVAL_SYM };
 
-enum { KERR_DIV_ZERO, KERR_BAD_OP, KERR_BAD_NUM };
-
-typedef struct {
+typedef struct kval {
     int type;
     long num;
-    int err;
+
+    char* err;
+    char* sym;
+
+    int count;
+    struct kval** cell;
 } kval;
 
-kval kval_num(long x);
-kval kval_err(int x);
-void kval_print(kval v);
-void kval_println(kval v);
+kval* kval_num(long x);
+kval* kval_err(char* m);
+kval* kval_sym(char* s);
+kval* kval_sexpr(void);
+
+kval* kval_read_num(mpc_ast_t* t);
+kval* kval_read(mpc_ast_t* t);
+kval* kval_add(kval* v, kval* x);
+
+void kval_expr_print(kval* v, char open, char close);
+void kval_print(kval* v);
+void kval_println(kval* v);
+
+void kval_del(kval* v);
 
 kval eval(mpc_ast_t* t);
 
@@ -50,18 +64,20 @@ int main(int argc, char *argv[])
 {
 
     mpc_parser_t* Number = mpc_new("number");
-    mpc_parser_t* Operator = mpc_new("operator");
+    mpc_parser_t* Symbol = mpc_new("symbol");
+    mpc_parser_t* Sexpr = mpc_new("sexpr");
     mpc_parser_t* Expr = mpc_new("expr");
     mpc_parser_t* Kyulang = mpc_new("Kyulang");
 
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            operator:   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" ; \
-            expr    :   <number> | '(' <operator> <expr>+ ')' ; \
-            Kyulang :   /^/ <operator> <expr>+ /$/ ; \
+            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" ; \
+            sexpr   :   '(' <expr>* ')' ; \
+            expr    :   <number> | <symbol> | <sexpr>' ; \
+            Kyulang :   /^/ <expr>* /$/ ; \
             ",
-            Number, Operator, Expr, Kyulang);
+            Number, Symbol, Sexpr, Expr, Kyulang);
 
     puts("Kyulang version 0.0.0.0.1");
     puts("Press Ctrl+C to Exit\n");
@@ -74,9 +90,11 @@ int main(int argc, char *argv[])
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Kyulang, &r)) {
             mpc_ast_print(r.output);
-            kval result = eval(r.output);
-            kval_println(result);
-            mpc_ast_delete(r.output);
+            kval* x = kval_read(r.output);
+            kval_println(x);
+            kval_del(x);
+            //kval_println(result);
+            //mpc_ast_delete(r.output);
         } else {
             mpc_err_print(r.error);
             mpc_err_delete(r.error);
@@ -85,12 +103,12 @@ int main(int argc, char *argv[])
         free(input);
     }
 
-    mpc_cleanup(4, Number, Operator, Expr, Kyulang);
+    mpc_cleanup(5, Number, Symbol, Sexpr, Expr, Kyulang);
 
     return 0;
 }
 
-kval eval(mpc_ast_t* t) {
+/*kval eval(mpc_ast_t* t) {
     if (strstr(t->tag, "number")) {
         errno = 0;
         long x = strtol(t->contents, NULL, 10);
@@ -114,8 +132,9 @@ kval eval(mpc_ast_t* t) {
     }
     return x;
 }
+*/
 
-kval eval_op(kval x, char* op, kval y) {
+/*kval eval_op(kval x, char* op, kval y) {
     if (x.type == KVAL_ERR) { return x; }
     if (y.type == KVAL_ERR) { return y; }
 
@@ -129,41 +148,110 @@ kval eval_op(kval x, char* op, kval y) {
     if (strcmp(op, "max") == 0) { return x.num < y.num ? y : x; }
 
     return kval_err(KERR_BAD_OP);
-}
+}*/
 
-kval kval_num(long x) {
-    kval v;
-    v.type = KVAL_NUM;
-    v.num = x;
+kval* kval_num(long x) {
+    kval* v = malloc(sizeof(kval));
+    v->type = KVAL_NUM;
+    v->num = x;
     return v;
 }
 
-kval kval_err(int x) {
-    kval v;
-    v.type = KVAL_ERR;
-    v.err = x;
+kval* kval_err(char* m) {
+    kval* v = malloc(sizeof(kval));
+    v->type = KVAL_ERR;
+    v->err = malloc(strlen(m) + 1);
+    strcpy(v->err, m);
     return v;
 }
 
-void kval_print(kval v) {
-    switch (v.type) {
-        case KVAL_NUM: printf("I uh- uh- think it is %li", v.num); break;
+kval* kval_sym(char* s) {
+    kval* v = malloc(sizeof(kval));
+    v->type = KVAL_SYM;
+    v->sym = malloc(strlen(s) + 1);
+    strcpy(v->sym, s);
+    return v;
+}
 
-        case KVAL_ERR:
-            if (v.err == KERR_DIV_ZERO) {
-                printf("ERROR>~<: You cannot divide by a zero!");
+kval* kval_sexpr(void) {
+    kval* v = malloc(sizeof(kval));
+    v->type = KVAL_SEXPR;
+    v->count = 0;
+    v->cell = NULL;
+    return v;
+}
+
+void kval_del(kval* v) {
+    switch(v->type) {
+        case KVAL_NUM: break;
+
+        case KVAL_ERR: (free(v->err)); break;
+        case KVAL_SYM: (free(v->sym)); break;
+
+        case KVAL_SEXPR:
+            for (int i = 0; i < v->count; i++) {
+                kval_del(v->cell[i]);
             }
-            if (v.err == KERR_BAD_OP) {
-                printf("ERROR>~<: The operator isn't valid bro!");
-            }
-            if (v.err == KERR_BAD_NUM) {
-                printf("ERROR>~<: The number is too big for me!");
-            }
-        break;
+
+            free(v->cell);
+            break;
+    }
+    free(v);
+}
+
+kval* kval_read_num(mpc_ast_t* t) {
+    errno = 0;
+    long x = strtol(t->contents, NULL, 0);
+    return errno != ERANGE ? kval_num(x) : kval_err("This is an invalid number!");
+}
+
+kval* kval_read(mpc_ast_t* t) {
+    if (strstr(t->tag, "number")) { return kval_read_num(t); }
+    if (strstr(t->tag, "symbol")) { return kval_sym(t->contents); }
+
+    kval* x = NULL;
+    if (strcmp(t->tag, ">") == 0) { x = kval_sexpr(); }
+    if (strstr(t->tag, "sexpr")) { x = kval_sexpr(); }
+
+    for (int i = 0; i < t->children_num; i++) {
+        if (strcmp(t->children[i]->contents, "(") == 0) { continue; }
+        if (strcmp(t->children[i]->contents, ")") == 0) { continue; }
+        if (strcmp(t->children[i]->tag, "regex") == 0) { continue; }
+        x = kval_add(x, kval_read(t->children[i]));
+    }
+    return x;
+}
+
+kval* kval_add(kval* v, kval* x) {
+    v->count++;
+    v->cell = realloc(v->cell, sizeof(kval*) * v->count);
+    v->cell[v->count-1] = x;
+    return v;
+}
+
+void kval_expr_print(kval* v, char open, char close) {
+    putchar(open);
+
+    for (int i = 0; i < v->count; i++) {
+        kval_print(v->cell[i]);
+
+        if (i != (v->count-1)) {
+            putchar(' ');
+        }
+    }
+    putchar(close);
+}
+
+void kval_print(kval* v) {
+    switch (v->type) {
+        case KVAL_NUM:  printf("%li", v->num); break;
+        case KVAL_ERR:  printf("Error: %s", v->err); break;
+        case KVAL_SYM:  printf("%s", v->sym); break;
+        case KVAL_SEXPR:  kval_expr_print(v, '(', ')'); break;
     }
 }
 
-void kval_println(kval v) {
+void kval_println(kval* v) {
     kval_print(v);
     putchar('\n');
 }
