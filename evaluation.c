@@ -56,9 +56,13 @@ void kval_println(kval* v);
 
 void kval_del(kval* v);
 
-kval eval(mpc_ast_t* t);
+kval* kval_eval_sexpr(kval* v);
 
-kval eval_op(kval x, char* op, kval y);
+kval* builtin_op(kval* a, char* op);
+
+kval* kval_eval(kval* v);
+kval* kval_take(kval* v, int i);
+kval* kval_pop(kval* v, int i);
 
 int main(int argc, char *argv[])
 {
@@ -90,11 +94,9 @@ int main(int argc, char *argv[])
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Kyulang, &r)) {
             mpc_ast_print(r.output);
-            kval* x = kval_read(r.output);
+            kval* x = kval_eval(kval_read(r.output));
             kval_println(x);
             kval_del(x);
-            //kval_println(result);
-            //mpc_ast_delete(r.output);
         } else {
             mpc_err_print(r.error);
             mpc_err_delete(r.error);
@@ -134,21 +136,108 @@ int main(int argc, char *argv[])
 }
 */
 
-/*kval eval_op(kval x, char* op, kval y) {
-    if (x.type == KVAL_ERR) { return x; }
-    if (y.type == KVAL_ERR) { return y; }
+kval* builtin_op(kval* a, char* op) {
+    for (int i = 0; i < a->count; i++) {
+        if (a->cell[i]->type != KVAL_NUM) {
+            kval_del(a);
+            kval_err(">~< Add some numbers in!");
+        }
+    }
 
-    if (strcmp(op, "+") == 0) { return kval_num(x.num + y.num); }
-    if (strcmp(op, "-") == 0) { return kval_num(x.num - y.num); }
-    if (strcmp(op, "*") == 0) { return kval_num(x.num * y.num); }
-    if (strcmp(op, "/") == 0) { return y.num == 0 ? kval_err(KERR_DIV_ZERO) : kval_num(x.num / y.num); }
-    if (strcmp(op, "%") == 0) { return y.num == 0 ? kval_err(KERR_DIV_ZERO) : kval_num(x.num % y.num); }
-    if (strcmp(op, "^") == 0) { return kval_num(pow(x.num, y.num)); }
-    if (strcmp(op, "min") == 0) { return x.num > y.num ? y : x; }
-    if (strcmp(op, "max") == 0) { return x.num < y.num ? y : x; }
+    kval* x = kval_pop(a, 0);
 
-    return kval_err(KERR_BAD_OP);
-}*/
+    if ((strcmp(op, "-") == 0) && a->count == 0) {
+      x->num = -x->num;
+    }
+
+    while (a->count > 0) {
+
+        kval* y = kval_pop(a, 0);
+
+        if (strcmp(op, "+") == 0) { (x->num += y->num); }
+        if (strcmp(op, "-") == 0) { (x->num -= y->num); }
+        if (strcmp(op, "*") == 0) { (x->num *= y->num); }
+        if (strcmp(op, "/") == 0) {
+            if (y->num == 0) {
+                kval_del(x); kval_del(y);
+                x = kval_err(">~< Cannot divide by zero, dummy!"); break;
+            }
+            x->num /= y->num;
+        }
+        if (strcmp(op, "%") == 0) {
+            if (y->num == 0) {
+                kval_del(x); kval_del(y);
+                x = kval_err(">~< Cannot divide by zero, dummy!"); break;
+            }
+            x->num %= y->num;
+        }
+        if (strcmp(op, "^") == 0) { x->num = pow(x->num, y->num); }
+        if (strcmp(op, "min") == 0) {
+            if (x->num > y->num) {
+                kval_del(x);
+                kval_del(a);
+                return y;
+            } else { kval_del(y); kval_del(a); return x; }}
+        if (strcmp(op, "max") == 0) {
+            if (x->num < y->num) {
+                kval_del(x);
+                kval_del(a);
+                return y;
+            } else { kval_del(y); kval_del(a); return x; }}
+        kval_del(y);
+    }
+    kval_del(a);
+    return x;
+}
+
+kval* kval_eval_sexpr(kval* v) {
+    for (int i = 0; i < v->count; i++) {
+        v->cell[i] = kval_eval(v->cell[i]);
+    }
+
+    for (int i = 0; i<v->count; i++) {
+        if (v->cell[i]->type == KVAL_ERR) { return kval_take(v, i); }
+    }
+
+    if (v->count == 0) {
+        return v;
+    }
+
+    if (v->count == 1) { return kval_take(v, 0); }
+
+    kval* f = kval_pop(v, 0);
+    if (f->type != KVAL_SYM) {
+        kval_del(f); kval_del(v);
+        return kval_err(">~< The S-expression needs to start with a symbol!");
+    }
+
+    kval* result = builtin_op(v, f->sym);
+    kval_del(f);
+    return result;
+}
+
+kval* kval_eval(kval* v) {
+    if (v->type == KVAL_SEXPR) { return kval_eval_sexpr(v); }
+    return v;
+}
+
+kval* kval_pop(kval* v, int i) {
+    kval* x = v->cell[i];
+
+    memmove(&v->cell[i], &v->cell[i+1], sizeof(kval*) * v->count-i-1);
+
+    v->count--;
+
+    v->cell = realloc(v->cell, sizeof(kval*) * v->count);
+    return x;
+}
+
+kval* kval_take(kval* v, int i) {
+    kval* x = kval_pop(v, i);
+    kval_del(v);
+    return x;
+}
+
 
 kval* kval_num(long x) {
     kval* v = malloc(sizeof(kval));
