@@ -86,6 +86,8 @@ kval* builtin_list(kval* v);
 kval* builtin_eval(kval* v);
 kval* builtin_join(kval* v);
 kval* builtin_cons(kval* v);
+kval* builtin_len(kval* v);
+kval* builtin_init(kval* v);
 
 kval* builtin(kval* a, char* func);
 
@@ -102,7 +104,7 @@ int main(int argc, char *argv[])
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \"cons\" ; \
+            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \"cons\" | \"len\" | \"init\" ; \
             sexpr   :   '(' <expr>* ')' ; \
             qexpr   :   '{' <expr>* '}' ; \
             expr    :   <number> | <symbol> | <sexpr> | <qexpr> ; \
@@ -401,6 +403,25 @@ kval* builtin_cons(kval* v) {
     return q;
 }
 
+kval* builtin_len(kval* v) {
+    KASSERT(v, v->count == 1, ">~< 'len' needs exactly one argument!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'len' only likes Q-expressions!");
+
+    kval* result = kval_num(v->cell[0]->count);
+    kval_del(v);
+    return result;
+}
+
+kval* builtin_init(kval* v) {
+    KASSERT(v, v->count == 1, ">~< 'init' needs exactly one argument!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'init' only likes Q-expressions!");
+    KASSERT(v, v->cell[0]->count != 0, ">~< 'init' passed {}!");
+
+    kval* x = kval_take(v, 0);
+    kval_del(kval_pop(x, x->count - 1));
+    return x;
+}
+
 kval* kval_join(kval* x, kval* y) {
     while (y->count) {
         x = kval_add(x, kval_pop(y, 0));
@@ -417,6 +438,8 @@ kval* builtin(kval* a, char* func) {
     if (strcmp("join", func) == 0) { return builtin_join(a); }
     if (strcmp("eval", func) == 0) { return builtin_eval(a); }
     if (strcmp("cons", func) == 0) { return builtin_cons(a); }
+    if (strcmp("len", func) == 0) { return builtin_len(a); }
+    if (strcmp("init", func) == 0) { return builtin_init(a); }
     if (strstr("+-*/%^", func) || strcmp(func,"min")==0 || strcmp(func,"max")==0) {
         return builtin_op(a, func);
     }
