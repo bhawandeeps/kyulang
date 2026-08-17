@@ -33,6 +33,14 @@ void add_history(char* unused) {}
 #define KASSERT(args, cond, err) \
     if (!(cond)) { kval_del(args); return kval_err(err); }
 
+//incorrect number of arguments
+#define KARGCHECK(args, err) \
+    if( args->count != 1 ) { kval_del(args); return kval_err(err); }
+
+//empty list
+#define EMPTYCHECK(args, err) \
+    if( args->cell[0]->count != 0 ) { kval_del(args); return kval_err(err); }
+
 enum { KVAL_NUM, KVAL_ERR, KVAL_SEXPR, KVAL_QEXPR, KVAL_SYM };
 
 typedef struct kval {
@@ -325,8 +333,8 @@ kval* kval_add(kval* v, kval* x) {
 
 
 kval* builtin_head(kval* v) {
-    KASSERT(v, v->count == 1, ">~< 'head' cannot handle that many arguments!");
-    KASSERT(v, v->cell[0]->count != 0, ">~< 'head' is empty!");
+    KARGCHECK(v,  ">~< 'head' cannot handle that many arguments!");
+    EMPTYCHECK(v, ">~< 'head' is empty!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' only likes Q-expressions!");
 
     kval* x = kval_take(v, 0);
@@ -338,8 +346,8 @@ kval* builtin_head(kval* v) {
 }
 
 kval* builtin_tail(kval* v) {
-    KASSERT(v, v->count == 1, ">~< 'tail' cannot handle that many arguments!");
-    KASSERT(v, v->cell[0]->count != 0, ">~< 'tail' is empty!");
+    KARGCHECK(v, ">~< 'tail' cannot handle that many arguments!");
+    EMPTYCHECK(v, ">~< 'tail' is empty!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'tail' only likes Q-expressions!");
 
     kval* x = kval_take(v, 0);
@@ -354,8 +362,8 @@ kval* builtin_list(kval* v) {
 }
 
 kval* builtin_eval(kval* v) {
-    KASSERT(v, v->count == 1, ">~< 'eval' cannot handle that many arguments!");
-    KASSERT(v, v->cell[0]->count != 0, ">~< 'eval' is empty!");
+    KARGCHECK(v, ">~< 'eval' cannot handle that many arguments!");
+    EMPTYCHECK(v, ">~< 'eval' is empty!");
 
     kval* x = kval_take(v, 0);
     x->type = KVAL_SEXPR;
