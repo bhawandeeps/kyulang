@@ -85,6 +85,7 @@ kval* builtin_tail(kval* v);
 kval* builtin_list(kval* v);
 kval* builtin_eval(kval* v);
 kval* builtin_join(kval* v);
+kval* builtin_cons(kval* v);
 
 kval* builtin(kval* a, char* func);
 
@@ -383,6 +384,21 @@ kval* builtin_join(kval* v) {
 
     kval_del(v);
     return x;
+}
+
+kval* builtin_cons(kval* v) {
+    KASSERT(v, v->count == 2, ">~< 'cons' needs exactly a value and a Q-Expression!");
+    KASSERT(v, v->cell[1]->type == KVAL_QEXPR, ">~< 'cons' needs a Q-Expression as its second argument!");
+
+    kval* x = kval_pop(v, 0);
+    kval* q = kval_take(v, 0);
+
+    q->count++;
+    q->cell = realloc(q->cell, sizeof(kval*) * q->count);
+    memmove(&q->cell[1], &q->cell[0], sizeof(kval*) * (q->count - 1));
+    q->cell[0] = x;
+
+    return q;
 }
 
 kval* kval_join(kval* x, kval* y) {
