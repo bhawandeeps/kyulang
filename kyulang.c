@@ -1,6 +1,7 @@
 #include "mpc.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -28,7 +29,11 @@ void add_history(char* unused) {}
 
 #endif
 
-enum { KVAL_NUM, KVAL_ERR, KVAL_SEXPR, KVAL_SYM };
+//macro for errors
+#define KASSERT(args, cond, err) \
+    if (!(cond)) { kval_del(args); return kval_err(err); }
+
+enum { KVAL_NUM, KVAL_ERR, KVAL_SEXPR, KVAL_QEXPR, KVAL_SYM };
 
 typedef struct kval {
     int type;
@@ -45,6 +50,7 @@ kval* kval_num(long x);
 kval* kval_err(char* m);
 kval* kval_sym(char* s);
 kval* kval_sexpr(void);
+kval* kval_qexpr(void);
 
 kval* kval_read_num(mpc_ast_t* t);
 kval* kval_read(mpc_ast_t* t);
@@ -63,6 +69,16 @@ kval* builtin_op(kval* a, char* op);
 kval* kval_eval(kval* v);
 kval* kval_take(kval* v, int i);
 kval* kval_pop(kval* v, int i);
+kval* kval_join(kval* x, kval* y);
+
+//qexpr funcs
+kval* builtin_head(kval* v);
+kval* builtin_tail(kval* v);
+kval* builtin_list(kval* v);
+kval* builtin_eval(kval* v);
+kval* builtin_join(kval* v);
+
+kval* builtin(kval* a, char* func);
 
 int main(int argc, char *argv[])
 {
@@ -70,18 +86,20 @@ int main(int argc, char *argv[])
     mpc_parser_t* Number = mpc_new("number");
     mpc_parser_t* Symbol = mpc_new("symbol");
     mpc_parser_t* Sexpr = mpc_new("sexpr");
+    mpc_parser_t* Qexpr = mpc_new("qexpr");
     mpc_parser_t* Expr = mpc_new("expr");
     mpc_parser_t* Kyulang = mpc_new("Kyulang");
 
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" ; \
+            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" ; \
             sexpr   :   '(' <expr>* ')' ; \
-            expr    :   <number> | <symbol> | <sexpr>' ; \
+            qexpr   :   '{' <expr>* '}' ; \
+            expr    :   <number> | <symbol> | <sexpr> | <qexpr> ; \
             Kyulang :   /^/ <expr>* /$/ ; \
             ",
-            Number, Symbol, Sexpr, Expr, Kyulang);
+            Number, Symbol, Sexpr, Qexpr, Expr, Kyulang);
 
     puts("Kyulang version 0.0.0.0.1");
     puts("Press Ctrl+C to Exit\n");
@@ -105,7 +123,7 @@ int main(int argc, char *argv[])
         free(input);
     }
 
-    mpc_cleanup(5, Number, Symbol, Sexpr, Expr, Kyulang);
+    mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr,  Expr, Kyulang);
 
     return 0;
 }
@@ -114,7 +132,7 @@ kval* builtin_op(kval* a, char* op) {
     for (int i = 0; i < a->count; i++) {
         if (a->cell[i]->type != KVAL_NUM) {
             kval_del(a);
-            kval_err(">~< Add some numbers in!");
+            return kval_err(">~< Add some numbers in!");
         }
     }
 
@@ -185,7 +203,7 @@ kval* kval_eval_sexpr(kval* v) {
         return kval_err(">~< The S-expression needs to start with a symbol!");
     }
 
-    kval* result = builtin_op(v, f->sym);
+    kval* result = builtin(v, f->sym);
     kval_del(f);
     return result;
 }
@@ -198,7 +216,7 @@ kval* kval_eval(kval* v) {
 kval* kval_pop(kval* v, int i) {
     kval* x = v->cell[i];
 
-    memmove(&v->cell[i], &v->cell[i+1], sizeof(kval*) * v->count-i-1);
+    memmove(&v->cell[i], &v->cell[i+1], sizeof(kval*) * (v->count-i-1));
 
     v->count--;
 
@@ -244,6 +262,14 @@ kval* kval_sexpr(void) {
     return v;
 }
 
+kval* kval_qexpr(void) {
+    kval* v = malloc(sizeof(kval));
+    v->type = KVAL_QEXPR;
+    v->count = 0;
+    v->cell = NULL;
+    return v;
+}
+
 void kval_del(kval* v) {
     switch(v->type) {
         case KVAL_NUM: break;
@@ -252,12 +278,14 @@ void kval_del(kval* v) {
         case KVAL_SYM: (free(v->sym)); break;
 
         case KVAL_SEXPR:
+        case KVAL_QEXPR:
             for (int i = 0; i < v->count; i++) {
                 kval_del(v->cell[i]);
             }
 
             free(v->cell);
             break;
+
     }
     free(v);
 }
@@ -275,10 +303,13 @@ kval* kval_read(mpc_ast_t* t) {
     kval* x = NULL;
     if (strcmp(t->tag, ">") == 0) { x = kval_sexpr(); }
     if (strstr(t->tag, "sexpr")) { x = kval_sexpr(); }
+    if (strstr(t->tag, "qexpr")) { x = kval_qexpr(); }
 
     for (int i = 0; i < t->children_num; i++) {
         if (strcmp(t->children[i]->contents, "(") == 0) { continue; }
         if (strcmp(t->children[i]->contents, ")") == 0) { continue; }
+        if (strcmp(t->children[i]->contents, "{") == 0) { continue; }
+        if (strcmp(t->children[i]->contents, "}") == 0) { continue; }
         if (strcmp(t->children[i]->tag, "regex") == 0) { continue; }
         x = kval_add(x, kval_read(t->children[i]));
     }
@@ -290,6 +321,82 @@ kval* kval_add(kval* v, kval* x) {
     v->cell = realloc(v->cell, sizeof(kval*) * v->count);
     v->cell[v->count-1] = x;
     return v;
+}
+
+
+kval* builtin_head(kval* v) {
+    KASSERT(v, v->count == 1, ">~< 'head' cannot handle that many arguments!");
+    KASSERT(v, v->cell[0]->count != 0, ">~< 'head' is empty!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' only likes Q-expressions!");
+
+    kval* x = kval_take(v, 0);
+
+    while (x->count > 1) {
+        kval_del(kval_pop(x, 1));
+    }
+    return x;
+}
+
+kval* builtin_tail(kval* v) {
+    KASSERT(v, v->count == 1, ">~< 'tail' cannot handle that many arguments!");
+    KASSERT(v, v->cell[0]->count != 0, ">~< 'tail' is empty!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'tail' only likes Q-expressions!");
+
+    kval* x = kval_take(v, 0);
+
+    kval_del(kval_pop(x, 0));
+    return x;
+}
+
+kval* builtin_list(kval* v) {
+    v->type = KVAL_QEXPR;
+    return v;
+}
+
+kval* builtin_eval(kval* v) {
+    KASSERT(v, v->count == 1, ">~< 'eval' cannot handle that many arguments!");
+    KASSERT(v, v->cell[0]->count != 0, ">~< 'eval' is empty!");
+
+    kval* x = kval_take(v, 0);
+    x->type = KVAL_SEXPR;
+    return kval_eval(x);
+}
+
+kval* builtin_join(kval* v) {
+    for (int i = 0; i < v->count; i++) {
+        KASSERT(v, v->cell[i]->type == KVAL_QEXPR, ">~< 'join' passed incorrect type!");
+    }
+
+    kval* x = kval_pop(v, 0);
+
+    while (v->count) {
+        x = kval_join(x, kval_pop(v, 0));
+    }
+
+    kval_del(v);
+    return x;
+}
+
+kval* kval_join(kval* x, kval* y) {
+    while (y->count) {
+        x = kval_add(x, kval_pop(y, 0));
+    }
+
+    kval_del(y);
+    return x;
+}
+
+kval* builtin(kval* a, char* func) {
+    if (strcmp("list", func) == 0) { return builtin_list(a); }
+    if (strcmp("head", func) == 0) { return builtin_head(a); }
+    if (strcmp("tail", func) == 0) { return builtin_tail(a); }
+    if (strcmp("join", func) == 0) { return builtin_join(a); }
+    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
+    if (strstr("+-*/%^", func) || strcmp(func,"min")==0 || strcmp(func,"max")==0) {
+        return builtin_op(a, func);
+    }
+    kval_del(a);
+    return kval_err(">~< I am sorry I do not know what this is!");
 }
 
 void kval_expr_print(kval* v, char open, char close) {
@@ -311,6 +418,7 @@ void kval_print(kval* v) {
         case KVAL_ERR:  printf("Error: %s", v->err); break;
         case KVAL_SYM:  printf("%s", v->sym); break;
         case KVAL_SEXPR:  kval_expr_print(v, '(', ')'); break;
+        case KVAL_QEXPR:  kval_expr_print(v, '{', '}'); break;
     }
 }
 
