@@ -102,7 +102,7 @@ int main(int argc, char *argv[])
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" ; \
+            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \"cons\" ; \
             sexpr   :   '(' <expr>* ')' ; \
             qexpr   :   '{' <expr>* '}' ; \
             expr    :   <number> | <symbol> | <sexpr> | <qexpr> ; \
@@ -416,6 +416,7 @@ kval* builtin(kval* a, char* func) {
     if (strcmp("tail", func) == 0) { return builtin_tail(a); }
     if (strcmp("join", func) == 0) { return builtin_join(a); }
     if (strcmp("eval", func) == 0) { return builtin_eval(a); }
+    if (strcmp("cons", func) == 0) { return builtin_cons(a); }
     if (strstr("+-*/%^", func) || strcmp(func,"min")==0 || strcmp(func,"max")==0) {
         return builtin_op(a, func);
     }
