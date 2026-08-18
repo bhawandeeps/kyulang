@@ -39,9 +39,17 @@ void add_history(char* unused) {}
 
 //empty list
 #define EMPTYCHECK(args, err) \
-    if( args->cell[0]->count != 0 ) { kval_del(args); return kval_err(err); }
+    if( args->cell[0]->count == 0 ) { kval_del(args); return kval_err(err); }
 
-enum { KVAL_NUM, KVAL_ERR, KVAL_SEXPR, KVAL_QEXPR, KVAL_SYM };
+/* STRUCTS AND ENUMS */
+struct kval;
+struct kenv;
+typedef struct kval kval;
+typedef struct kenv kenv;
+
+enum { KVAL_NUM, KVAL_ERR, KVAL_FUN,  KVAL_SEXPR, KVAL_QEXPR, KVAL_SYM };
+
+typedef kval*(*kbuiltin)(kenv*, kval*);
 
 typedef struct kval {
     int type;
@@ -50,15 +58,34 @@ typedef struct kval {
     char* err;
     char* sym;
 
+    kbuiltin func;
+
     int count;
     struct kval** cell;
 } kval;
 
+struct kenv {
+    int count;
+    char** sym;
+    kval** vals;
+};
+
+/* FUNCTION DECLARATIONS */
+
+//kenv functions
+kenv* kenv_new(void);
+void kenv_del(kenv* e);
+
+kval* kenv_get(kenv* e, kval* k);
+void kenv_put(kenv* e, kval* k, kval* v);
+
+//kval functions
 kval* kval_num(long x);
 kval* kval_err(char* m);
 kval* kval_sym(char* s);
 kval* kval_sexpr(void);
 kval* kval_qexpr(void);
+kval* kval_fun(kbuiltin func);
 
 kval* kval_read_num(mpc_ast_t* t);
 kval* kval_read(mpc_ast_t* t);
@@ -67,30 +94,45 @@ kval* kval_add(kval* v, kval* x);
 void kval_expr_print(kval* v, char open, char close);
 void kval_print(kval* v);
 void kval_println(kval* v);
+kval* kval_copy(kval* v);
 
 void kval_del(kval* v);
 
-kval* kval_eval_sexpr(kval* v);
+kval* kval_eval_sexpr(kenv* e, kval* v);
 
-kval* builtin_op(kval* a, char* op);
+kval* builtin_op(kenv* e, kval* a, char* op);
 
-kval* kval_eval(kval* v);
+kval* kval_eval(kenv* e, kval* v);
 kval* kval_take(kval* v, int i);
 kval* kval_pop(kval* v, int i);
 kval* kval_join(kval* x, kval* y);
 
-//qexpr funcs
-kval* builtin_head(kval* v);
-kval* builtin_tail(kval* v);
-kval* builtin_list(kval* v);
-kval* builtin_eval(kval* v);
-kval* builtin_join(kval* v);
-kval* builtin_cons(kval* v);
-kval* builtin_len(kval* v);
-kval* builtin_init(kval* v);
+//builtins
+kval* builtin_add(kenv* e, kval* a);
+kval* builtin_sub(kenv* e, kval* a);
+kval* builtin_mul(kenv* e, kval* a);
+kval* builtin_div(kenv* e, kval* a);
 
-kval* builtin(kval* a, char* func);
+kval* builtin_rem(kenv* e, kval* a);
+kval* builtin_pow(kenv* e, kval* a);
+kval* builtin_min(kenv* e, kval* a);
+kval* builtin_max(kenv* e, kval* a);
 
+kval* builtin_head(kenv* e, kval* v);
+kval* builtin_tail(kenv* e, kval* v);
+kval* builtin_list(kenv* e, kval* v);
+kval* builtin_eval(kenv* e, kval* v);
+kval* builtin_join(kenv* e, kval* v);
+kval* builtin_cons(kenv* e, kval* v);
+kval* builtin_len(kenv* e, kval* v);
+kval* builtin_init(kenv* e, kval* v);
+
+void kenv_add_builtin(kenv* e, char* name, kbuiltin func);
+void kenv_add_builtins(kenv* e);
+
+kval* builtin_def(kenv* e, kval* a);
+
+//main
 int main(int argc, char *argv[])
 {
 
@@ -104,7 +146,7 @@ int main(int argc, char *argv[])
     mpca_lang(MPCA_LANG_DEFAULT,
             "   \
             number  :   /-?[0-9]+/ ;    \
-            symbol  :   '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \"cons\" | \"len\" | \"init\" ; \
+            symbol  :    /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ; \
             sexpr   :   '(' <expr>* ')' ; \
             qexpr   :   '{' <expr>* '}' ; \
             expr    :   <number> | <symbol> | <sexpr> | <qexpr> ; \
@@ -112,8 +154,11 @@ int main(int argc, char *argv[])
             ",
             Number, Symbol, Sexpr, Qexpr, Expr, Kyulang);
 
-    puts("Kyulang version 0.0.0.0.1");
+    puts("Kyulang version 0.0.0.0.7");
     puts("Press Ctrl+C to Exit\n");
+
+    kenv* e = kenv_new();
+    kenv_add_builtins(e);
 
     while (1) {
         char* input = readline("halo^_^ ~>");
@@ -122,10 +167,12 @@ int main(int argc, char *argv[])
 
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Kyulang, &r)) {
-            mpc_ast_print(r.output);
-            kval* x = kval_eval(kval_read(r.output));
+
+            kval* x = kval_eval(e, kval_read(r.output));
             kval_println(x);
             kval_del(x);
+
+            mpc_ast_delete(r.output);
         } else {
             mpc_err_print(r.error);
             mpc_err_delete(r.error);
@@ -134,12 +181,32 @@ int main(int argc, char *argv[])
         free(input);
     }
 
+    kenv_del(e);
+
     mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr,  Expr, Kyulang);
 
     return 0;
 }
 
-kval* builtin_op(kval* a, char* op) {
+kenv* kenv_new(void) {
+    kenv* e = malloc(sizeof(kenv));
+    e->count = 0;
+    e->sym = NULL;
+    e->vals = NULL;
+    return e;
+}
+
+void kenv_del(kenv* e) {
+    for (int i = 0; i<e->count; i++) {
+        free(e->sym[i]);
+        kval_del(e->vals[i]);
+    }
+    free(e->sym);
+    free(e->vals);
+    free(e);
+}
+
+kval* builtin_op(kenv* e, kval* a, char* op) {
     for (int i = 0; i < a->count; i++) {
         if (a->cell[i]->type != KVAL_NUM) {
             kval_del(a);
@@ -193,34 +260,38 @@ kval* builtin_op(kval* a, char* op) {
     return x;
 }
 
-kval* kval_eval_sexpr(kval* v) {
+/* FUNCTION DEFINITIONS */
+
+kval* kval_eval_sexpr(kenv* e, kval* v) {
     for (int i = 0; i < v->count; i++) {
-        v->cell[i] = kval_eval(v->cell[i]);
+        v->cell[i] = kval_eval(e, v->cell[i]);
     }
 
     for (int i = 0; i<v->count; i++) {
         if (v->cell[i]->type == KVAL_ERR) { return kval_take(v, i); }
     }
 
-    if (v->count == 0) {
-        return v;
-    }
+    if (v->count == 0) { return v; }
 
     if (v->count == 1) { return kval_take(v, 0); }
 
     kval* f = kval_pop(v, 0);
-    if (f->type != KVAL_SYM) {
+    if (f->type != KVAL_FUN) {
         kval_del(f); kval_del(v);
-        return kval_err(">~< The S-expression needs to start with a symbol!");
+        return kval_err(">~< The first element needs to be a function!");
     }
 
-    kval* result = builtin(v, f->sym);
+    kval* result = f->func(e, v);
     kval_del(f);
     return result;
 }
 
-kval* kval_eval(kval* v) {
-    if (v->type == KVAL_SEXPR) { return kval_eval_sexpr(v); }
+kval* kval_eval(kenv* e, kval* v) {
+    if (v->type == KVAL_SYM) {
+        kval* x = kenv_get(e, v);
+        return x;
+    }
+    if (v->type == KVAL_SEXPR) { return kval_eval_sexpr(e, v); }
     return v;
 }
 
@@ -280,10 +351,44 @@ kval* kval_qexpr(void) {
     v->cell = NULL;
     return v;
 }
+kval* kval_fun(kbuiltin func) {
+    kval* v = malloc(sizeof(kval));
+    v->type = KVAL_FUN;
+    v->func = func;
+    return v;
+}
+
+kval* kenv_get(kenv* e, kval* k) {
+    for (int i = 0; i < e->count; i++) {
+        if (strcmp(e->sym[i], k->sym) == 0) {
+            return kval_copy(e->vals[i]);
+        }
+    }
+    return kval_err(">~< Ru-oh, the symbol is unbound!");
+}
+
+void kenv_put(kenv* e, kval* k, kval* v) {
+    for (int i = 0; i  < e->count; i++) {
+        if (strcmp(e->sym[i], k->sym) == 0) {
+            kval_del(e->vals[i]);
+            e->vals[i] = kval_copy(v);
+            return;
+        }
+    }
+
+    e->count++;
+    e->vals = realloc(e->vals, sizeof(kval*) * e->count);
+    e->sym = realloc(e->sym, sizeof(char*) * e->count);
+
+    e->vals[e->count-1] = kval_copy(v);
+    e->sym[e->count-1] = malloc(strlen(k->sym) + 1);
+    strcpy(e->sym[e->count-1], k->sym);
+}
 
 void kval_del(kval* v) {
     switch(v->type) {
         case KVAL_NUM: break;
+        case KVAL_FUN: break;
 
         case KVAL_ERR: (free(v->err)); break;
         case KVAL_SYM: (free(v->sym)); break;
@@ -334,8 +439,38 @@ kval* kval_add(kval* v, kval* x) {
     return v;
 }
 
+kval* builtin_add(kenv* e, kval* a) {
+  return builtin_op(e, a, "+");
+}
 
-kval* builtin_head(kval* v) {
+kval* builtin_sub(kenv* e, kval* a) {
+  return builtin_op(e, a, "-");
+}
+
+kval* builtin_mul(kenv* e, kval* a) {
+  return builtin_op(e, a, "*");
+}
+
+kval* builtin_div(kenv* e, kval* a) {
+  return builtin_op(e, a, "/");
+}
+
+kval* builtin_rem(kenv* e, kval* a) {
+    return builtin_op(e, a, "%");
+}
+
+kval* builtin_pow(kenv* e, kval* a) {
+    return builtin_op(e, a, "^");
+}
+
+kval* builtin_min(kenv* e, kval* a) {
+    return builtin_op(e, a, "min");
+}
+kval* builtin_max(kenv* e, kval* a) {
+    return builtin_op(e, a, "max");
+}
+
+kval* builtin_head(kenv* e, kval* v) {
     KARGCHECK(v,  ">~< 'head' cannot handle that many arguments!");
     EMPTYCHECK(v, ">~< 'head' is empty!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' only likes Q-expressions!");
@@ -348,7 +483,7 @@ kval* builtin_head(kval* v) {
     return x;
 }
 
-kval* builtin_tail(kval* v) {
+kval* builtin_tail(kenv* e, kval* v) {
     KARGCHECK(v, ">~< 'tail' cannot handle that many arguments!");
     EMPTYCHECK(v, ">~< 'tail' is empty!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'tail' only likes Q-expressions!");
@@ -359,21 +494,21 @@ kval* builtin_tail(kval* v) {
     return x;
 }
 
-kval* builtin_list(kval* v) {
+kval* builtin_list(kenv* e, kval* v) {
     v->type = KVAL_QEXPR;
     return v;
 }
 
-kval* builtin_eval(kval* v) {
+kval* builtin_eval(kenv* e, kval* v) {
     KARGCHECK(v, ">~< 'eval' cannot handle that many arguments!");
     EMPTYCHECK(v, ">~< 'eval' is empty!");
 
     kval* x = kval_take(v, 0);
     x->type = KVAL_SEXPR;
-    return kval_eval(x);
+    return kval_eval(e, x);
 }
 
-kval* builtin_join(kval* v) {
+kval* builtin_join(kenv* e, kval* v) {
     for (int i = 0; i < v->count; i++) {
         KASSERT(v, v->cell[i]->type == KVAL_QEXPR, ">~< 'join' passed incorrect type!");
     }
@@ -388,7 +523,7 @@ kval* builtin_join(kval* v) {
     return x;
 }
 
-kval* builtin_cons(kval* v) {
+kval* builtin_cons(kenv* e, kval* v) {
     KASSERT(v, v->count == 2, ">~< 'cons' needs exactly a value and a Q-Expression!");
     KASSERT(v, v->cell[1]->type == KVAL_QEXPR, ">~< 'cons' needs a Q-Expression as its second argument!");
 
@@ -403,7 +538,7 @@ kval* builtin_cons(kval* v) {
     return q;
 }
 
-kval* builtin_len(kval* v) {
+kval* builtin_len(kenv* e, kval* v) {
     KASSERT(v, v->count == 1, ">~< 'len' needs exactly one argument!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'len' only likes Q-expressions!");
 
@@ -412,7 +547,7 @@ kval* builtin_len(kval* v) {
     return result;
 }
 
-kval* builtin_init(kval* v) {
+kval* builtin_init(kenv* e, kval* v) {
     KASSERT(v, v->count == 1, ">~< 'init' needs exactly one argument!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'init' only likes Q-expressions!");
     KASSERT(v, v->cell[0]->count != 0, ">~< 'init' passed {}!");
@@ -422,6 +557,56 @@ kval* builtin_init(kval* v) {
     return x;
 }
 
+void kenv_add_builtin(kenv* e, char* name, kbuiltin func) {
+    kval* k = kval_sym(name);
+    kval* v = kval_fun(func);
+    kenv_put(e, k, v);
+    kval_del(k);
+    kval_del(v);
+}
+void kenv_add_builtins(kenv* e) {
+    kenv_add_builtin(e, "list", builtin_list);
+    kenv_add_builtin(e, "head", builtin_head);
+    kenv_add_builtin(e, "tail", builtin_tail);
+    kenv_add_builtin(e, "eval", builtin_eval);
+    kenv_add_builtin(e, "join", builtin_join);
+    kenv_add_builtin(e, "cons", builtin_cons);
+    kenv_add_builtin(e, "len", builtin_len);
+    kenv_add_builtin(e, "init", builtin_init);
+
+    /* Mathematical Functions */
+    kenv_add_builtin(e, "+", builtin_add);
+    kenv_add_builtin(e, "-", builtin_sub);
+    kenv_add_builtin(e, "*", builtin_mul);
+    kenv_add_builtin(e, "/", builtin_div);
+    kenv_add_builtin(e, "%", builtin_rem);
+    kenv_add_builtin(e, "^", builtin_pow);
+
+    kenv_add_builtin(e, "min", builtin_min);
+    kenv_add_builtin(e, "max", builtin_max);
+
+    kenv_add_builtin(e, "def", builtin_def);
+}
+
+kval* builtin_def(kenv* e, kval* a) {
+ KASSERT(a, a->cell[0]->type == KVAL_QEXPR, ">~< The 'def' function does not work with that!" );
+
+ kval* syms = a->cell[0];
+
+ for (int i = 0; i < syms->count; i++) {
+     KASSERT(a, syms->cell[i]->type == KVAL_SYM, ">~< You are trying to make 'def' dp something that it cannot!");
+ }
+
+ KASSERT(a, syms->count == a->count-1, ">~< The 'def' function cannot define incorrect number of values to symbols");
+
+ for (int i = 0; i < syms->count; i++) {
+     kenv_put(e, syms->cell[i], a->cell[i+1]);
+ }
+
+ kval_del(a);
+ return kval_sexpr();
+}
+
 kval* kval_join(kval* x, kval* y) {
     while (y->count) {
         x = kval_add(x, kval_pop(y, 0));
@@ -429,22 +614,6 @@ kval* kval_join(kval* x, kval* y) {
 
     kval_del(y);
     return x;
-}
-
-kval* builtin(kval* a, char* func) {
-    if (strcmp("list", func) == 0) { return builtin_list(a); }
-    if (strcmp("head", func) == 0) { return builtin_head(a); }
-    if (strcmp("tail", func) == 0) { return builtin_tail(a); }
-    if (strcmp("join", func) == 0) { return builtin_join(a); }
-    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
-    if (strcmp("cons", func) == 0) { return builtin_cons(a); }
-    if (strcmp("len", func) == 0) { return builtin_len(a); }
-    if (strcmp("init", func) == 0) { return builtin_init(a); }
-    if (strstr("+-*/%^", func) || strcmp(func,"min")==0 || strcmp(func,"max")==0) {
-        return builtin_op(a, func);
-    }
-    kval_del(a);
-    return kval_err(">~< I am sorry I do not know what this is!");
 }
 
 void kval_expr_print(kval* v, char open, char close) {
@@ -460,9 +629,38 @@ void kval_expr_print(kval* v, char open, char close) {
     putchar(close);
 }
 
+kval* kval_copy(kval* v) {
+    kval* x = malloc(sizeof(kval));
+    x->type = v->type;
+
+    switch (v->type) {
+        case KVAL_NUM: x->num = v->num; break;
+        case KVAL_FUN: x->func = v->func; break;
+
+        case KVAL_SYM:
+            x->sym = malloc(strlen(v->sym) + 1);
+            strcpy(x->sym, v->sym); break;
+
+        case KVAL_ERR:
+            x->err = malloc(strlen(v->err) + 1);
+            strcpy(x->err, v->err); break;
+
+        case KVAL_SEXPR:
+        case KVAL_QEXPR:
+            x->count = v->count;
+            x->cell = malloc(sizeof(kval*) * x->count);
+            for (int i = 0; i<x->count; i++) {
+                x->cell[i] = kval_copy(v->cell[i]);
+            }
+    }
+
+    return x;
+}
+
 void kval_print(kval* v) {
     switch (v->type) {
         case KVAL_NUM:  printf("%li", v->num); break;
+        case KVAL_FUN:  printf("<function>"); break;
         case KVAL_ERR:  printf("Error: %s", v->err); break;
         case KVAL_SYM:  printf("%s", v->sym); break;
         case KVAL_SEXPR:  kval_expr_print(v, '(', ')'); break;
