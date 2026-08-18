@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,8 +31,12 @@ void add_history(char* unused) {}
 #endif
 
 //macro for errors
-#define KASSERT(args, cond, err) \
-    if (!(cond)) { kval_del(args); return kval_err(err); }
+#define KASSERT(args, cond, fmt, ...) \
+  if (!(cond)) { \
+    kval* err = kval_err(fmt, ##__VA_ARGS__); \
+    kval_del(args); \
+    return err; \
+  }
 
 //incorrect number of arguments
 #define KARGCHECK(args, err) \
@@ -81,7 +86,7 @@ void kenv_put(kenv* e, kval* k, kval* v);
 
 //kval functions
 kval* kval_num(long x);
-kval* kval_err(char* m);
+kval* kval_err(char* fmt, ...);
 kval* kval_sym(char* s);
 kval* kval_sexpr(void);
 kval* kval_qexpr(void);
@@ -131,6 +136,8 @@ void kenv_add_builtin(kenv* e, char* name, kbuiltin func);
 void kenv_add_builtins(kenv* e);
 
 kval* builtin_def(kenv* e, kval* a);
+
+char* ktype_name(int t);
 
 //main
 int main(int argc, char *argv[])
@@ -209,11 +216,12 @@ void kenv_del(kenv* e) {
 kval* builtin_op(kenv* e, kval* a, char* op) {
     for (int i = 0; i < a->count; i++) {
         if (a->cell[i]->type != KVAL_NUM) {
+            char* bad_type = ktype_name(a->cell[i]->type);
             kval_del(a);
-            return kval_err(">~< Add some numbers in!");
+            return kval_err(">~< '%s' does not know what %s is. Use %s!",
+                             op, bad_type, ktype_name(KVAL_NUM));
         }
     }
-
     kval* x = kval_pop(a, 0);
 
     if ((strcmp(op, "-") == 0) && a->count == 0) {
@@ -278,7 +286,7 @@ kval* kval_eval_sexpr(kenv* e, kval* v) {
     kval* f = kval_pop(v, 0);
     if (f->type != KVAL_FUN) {
         kval_del(f); kval_del(v);
-        return kval_err(">~< The first element needs to be a function!");
+        return kval_err(">~< %s is not a function, dummy!", ktype_name(f->type));
     }
 
     kval* result = f->func(e, v);
@@ -320,11 +328,20 @@ kval* kval_num(long x) {
     return v;
 }
 
-kval* kval_err(char* m) {
+kval* kval_err(char* fmt, ...) {
     kval* v = malloc(sizeof(kval));
     v->type = KVAL_ERR;
-    v->err = malloc(strlen(m) + 1);
-    strcpy(v->err, m);
+
+    va_list va;
+    va_start(va, fmt);
+
+    v->err = malloc(512);
+
+    vsnprintf(v->err, 511, fmt, va);
+
+    v->err = realloc(v->err, strlen(v->err) + 1);
+
+    va_end(va);
     return v;
 }
 
@@ -364,7 +381,7 @@ kval* kenv_get(kenv* e, kval* k) {
             return kval_copy(e->vals[i]);
         }
     }
-    return kval_err(">~< Ru-oh, the symbol is unbound!");
+    return kval_err(">~< Ru-oh, the symbol %s is unbound!", k->sym);
 }
 
 void kenv_put(kenv* e, kval* k, kval* v) {
@@ -473,7 +490,7 @@ kval* builtin_max(kenv* e, kval* a) {
 kval* builtin_head(kenv* e, kval* v) {
     KARGCHECK(v,  ">~< 'head' cannot handle that many arguments!");
     EMPTYCHECK(v, ">~< 'head' is empty!");
-    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' only likes Q-expressions!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
 
     kval* x = kval_take(v, 0);
 
@@ -486,7 +503,7 @@ kval* builtin_head(kenv* e, kval* v) {
 kval* builtin_tail(kenv* e, kval* v) {
     KARGCHECK(v, ">~< 'tail' cannot handle that many arguments!");
     EMPTYCHECK(v, ">~< 'tail' is empty!");
-    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'tail' only likes Q-expressions!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
 
     kval* x = kval_take(v, 0);
 
@@ -510,7 +527,7 @@ kval* builtin_eval(kenv* e, kval* v) {
 
 kval* builtin_join(kenv* e, kval* v) {
     for (int i = 0; i < v->count; i++) {
-        KASSERT(v, v->cell[i]->type == KVAL_QEXPR, ">~< 'join' passed incorrect type!");
+        KASSERT(v, v->cell[i]->type == KVAL_QEXPR, ">~< 'join' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
     }
 
     kval* x = kval_pop(v, 0);
@@ -540,7 +557,7 @@ kval* builtin_cons(kenv* e, kval* v) {
 
 kval* builtin_len(kenv* e, kval* v) {
     KASSERT(v, v->count == 1, ">~< 'len' needs exactly one argument!");
-    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'len' only likes Q-expressions!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'len' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
 
     kval* result = kval_num(v->cell[0]->count);
     kval_del(v);
@@ -549,7 +566,7 @@ kval* builtin_len(kenv* e, kval* v) {
 
 kval* builtin_init(kenv* e, kval* v) {
     KASSERT(v, v->count == 1, ">~< 'init' needs exactly one argument!");
-    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'init' only likes Q-expressions!");
+    KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'init' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
     KASSERT(v, v->cell[0]->count != 0, ">~< 'init' passed {}!");
 
     kval* x = kval_take(v, 0);
@@ -671,4 +688,16 @@ void kval_print(kval* v) {
 void kval_println(kval* v) {
     kval_print(v);
     putchar('\n');
+}
+
+char* ktype_name(int t) {
+  switch(t) {
+    case KVAL_FUN: return "Function";
+    case KVAL_NUM: return "Number";
+    case KVAL_ERR: return "Error";
+    case KVAL_SYM: return "Symbol";
+    case KVAL_SEXPR: return "S-Expression";
+    case KVAL_QEXPR: return "Q-Expression";
+    default: return "Unknown";
+  }
 }
