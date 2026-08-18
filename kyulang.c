@@ -527,7 +527,7 @@ kval* builtin_eval(kenv* e, kval* v) {
 
 kval* builtin_join(kenv* e, kval* v) {
     for (int i = 0; i < v->count; i++) {
-        KASSERT(v, v->cell[i]->type == KVAL_QEXPR, ">~< 'join' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
+        KASSERT(v, v->cell[i]->type == KVAL_QEXPR, ">~< 'join' does not like %s, use %s instead!", ktype_name(v->cell[i]->type), ktype_name(KVAL_QEXPR));
     }
 
     kval* x = kval_pop(v, 0);
