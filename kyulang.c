@@ -54,6 +54,8 @@ typedef struct kenv kenv;
 
 enum { KVAL_NUM, KVAL_ERR, KVAL_FUN,  KVAL_SEXPR, KVAL_QEXPR, KVAL_SYM };
 
+typedef void(*repl_cmd)(kenv* e);
+
 typedef kval*(*kbuiltin)(kenv*, kval*);
 
 typedef struct kval {
@@ -70,6 +72,11 @@ typedef struct kval {
     struct kval** cell;
 } kval;
 
+typedef struct {
+    char* name;
+    repl_cmd fn;
+} repl_command_t;
+
 struct kenv {
     int count;
     char** sym;
@@ -77,6 +84,10 @@ struct kenv {
 };
 
 /* FUNCTION DECLARATIONS */
+
+//repl level functions
+int try_repl_command(char* input, kenv* e);
+void repl_printall(kenv* e);
 
 //kenv functions
 kenv* kenv_new(void);
@@ -140,7 +151,14 @@ kval* builtin_def(kenv* e, kval* a);
 
 char* ktype_name(int t);
 
-//main
+/* REPL TABLE DEFINITION  */
+repl_command_t repl_commands[] = {
+    { "printall", repl_printall }
+};
+# define REPL_COMMAND_COUNT (sizeof(repl_commands) / sizeof(repl_commands[0]))
+
+
+/* MAIN CODE BLOCK */
 int main(int argc, char *argv[])
 {
 
@@ -172,6 +190,11 @@ int main(int argc, char *argv[])
         char* input = readline("halo^_^ ~>");
 
         add_history(input);
+
+        if (try_repl_command(input, e)) {
+            free(input);
+            continue;
+        }
 
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Kyulang, &r)) {
@@ -269,7 +292,37 @@ kval* builtin_op(kenv* e, kval* a, char* op) {
     return x;
 }
 
+
 /* FUNCTION DEFINITIONS */
+
+// repl level functions
+void repl_printall(kenv* e) {
+    int found = 0;
+
+    for (int i = 0; i < e->count; i++) {
+        if (e->vals[i]->type == KVAL_FUN) {
+            continue;
+        }
+        printf("%s: ", e->sym[i]);
+        kval_println(e->vals[i]);
+        found = 1;
+    }
+    if (found == 0) {
+        printf(">~< No variables exist in this session!\n");
+    }
+
+}
+
+int try_repl_command(char* input, kenv* e) {
+    for (size_t i = 0; i < REPL_COMMAND_COUNT; i++) {
+        if (strcmp(input, repl_commands[i].name) == 0) {
+            repl_commands[i].fn(e);
+            return 1;
+        }
+    }
+    return 0;
+}
+// repl level functions end
 
 kval* kval_eval_sexpr(kenv* e, kval* v) {
     for (int i = 0; i < v->count; i++) {
