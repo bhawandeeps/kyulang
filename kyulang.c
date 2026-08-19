@@ -191,6 +191,12 @@ int main(int argc, char *argv[])
 
         add_history(input);
 
+        if (strcmp(input, "clear")) {
+            puts("Tankyu and until we meet again! ^_^");
+            free(input);
+            break;
+        }
+
         if (try_repl_command(input, e)) {
             free(input);
             continue;
@@ -310,7 +316,6 @@ void repl_printall(kenv* e) {
     if (found == 0) {
         printf(">~< No variables exist in this session!\n");
     }
-
 }
 
 int try_repl_command(char* input, kenv* e) {
