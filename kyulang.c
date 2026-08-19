@@ -62,6 +62,7 @@ typedef struct kval {
 
     char* err;
     char* sym;
+    char* kbuiltin_name;
 
     kbuiltin func;
 
@@ -90,7 +91,7 @@ kval* kval_err(char* fmt, ...);
 kval* kval_sym(char* s);
 kval* kval_sexpr(void);
 kval* kval_qexpr(void);
-kval* kval_fun(kbuiltin func);
+kval* kval_fun(kbuiltin func, char* name);
 
 kval* kval_read_num(mpc_ast_t* t);
 kval* kval_read(mpc_ast_t* t);
@@ -368,10 +369,12 @@ kval* kval_qexpr(void) {
     v->cell = NULL;
     return v;
 }
-kval* kval_fun(kbuiltin func) {
+kval* kval_fun(kbuiltin func, char* name) {
     kval* v = malloc(sizeof(kval));
     v->type = KVAL_FUN;
     v->func = func;
+    v->kbuiltin_name = malloc(strlen(name) + 1);
+    strcpy(v->kbuiltin_name, name);
     return v;
 }
 
@@ -405,7 +408,7 @@ void kenv_put(kenv* e, kval* k, kval* v) {
 void kval_del(kval* v) {
     switch(v->type) {
         case KVAL_NUM: break;
-        case KVAL_FUN: break;
+        case KVAL_FUN: (free(v->kbuiltin_name)); break;
 
         case KVAL_ERR: (free(v->err)); break;
         case KVAL_SYM: (free(v->sym)); break;
@@ -576,7 +579,7 @@ kval* builtin_init(kenv* e, kval* v) {
 
 void kenv_add_builtin(kenv* e, char* name, kbuiltin func) {
     kval* k = kval_sym(name);
-    kval* v = kval_fun(func);
+    kval* v = kval_fun(func, name);
     kenv_put(e, k, v);
     kval_del(k);
     kval_del(v);
@@ -652,7 +655,11 @@ kval* kval_copy(kval* v) {
 
     switch (v->type) {
         case KVAL_NUM: x->num = v->num; break;
-        case KVAL_FUN: x->func = v->func; break;
+        case KVAL_FUN:
+            x->func = v->func;
+            x->kbuiltin_name = malloc(strlen(v->kbuiltin_name) + 1);
+            strcpy(x->kbuiltin_name, v->kbuiltin_name);
+            break;
 
         case KVAL_SYM:
             x->sym = malloc(strlen(v->sym) + 1);
@@ -677,7 +684,7 @@ kval* kval_copy(kval* v) {
 void kval_print(kval* v) {
     switch (v->type) {
         case KVAL_NUM:  printf("%li", v->num); break;
-        case KVAL_FUN:  printf("<function>"); break;
+        case KVAL_FUN:  printf("<%s>", v->kbuiltin_name); break;
         case KVAL_ERR:  printf("Error: %s", v->err); break;
         case KVAL_SYM:  printf("%s", v->sym); break;
         case KVAL_SEXPR:  kval_expr_print(v, '(', ')'); break;
