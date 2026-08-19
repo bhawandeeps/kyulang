@@ -39,8 +39,8 @@ void add_history(char* unused) {}
   }
 
 //incorrect number of arguments
-#define KARGCHECK(args, err) \
-    if( args->count != 1 ) { kval_del(args); return kval_err(err); }
+#define KARGCHECK(args, fmt, ...) \
+    if( args->count != 1 ) { kval* kerr =  kval_err(fmt, ##__VA_ARGS__); kval_del(args); return kerr; }
 
 //empty list
 #define EMPTYCHECK(args, err) \
@@ -488,7 +488,7 @@ kval* builtin_max(kenv* e, kval* a) {
 }
 
 kval* builtin_head(kenv* e, kval* v) {
-    KARGCHECK(v,  ">~< 'head' cannot handle that many arguments!");
+    KARGCHECK(v,  ">~< 'head' cannot fit %d arguments, take it %s argument(s) at a time!", v->count, "1");
     EMPTYCHECK(v, ">~< 'head' is empty!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
 
@@ -501,7 +501,7 @@ kval* builtin_head(kenv* e, kval* v) {
 }
 
 kval* builtin_tail(kenv* e, kval* v) {
-    KARGCHECK(v, ">~< 'tail' cannot handle that many arguments!");
+    KARGCHECK(v,  ">~< 'tail' cannot fit %d arguments, take it %s argument(s) at a time!", v->count, "1");
     EMPTYCHECK(v, ">~< 'tail' is empty!");
     KASSERT(v, v->cell[0]->type == KVAL_QEXPR, ">~< 'head' does not like %s, use %s instead!", ktype_name(v->cell[0]->type), ktype_name(KVAL_QEXPR));
 
@@ -517,7 +517,7 @@ kval* builtin_list(kenv* e, kval* v) {
 }
 
 kval* builtin_eval(kenv* e, kval* v) {
-    KARGCHECK(v, ">~< 'eval' cannot handle that many arguments!");
+    KARGCHECK(v,  ">~< 'eval' cannot fit %d arguments, take it %s argument(s) at a time!", v->count, "1");
     EMPTYCHECK(v, ">~< 'eval' is empty!");
 
     kval* x = kval_take(v, 0);
